@@ -15,6 +15,7 @@ Read `PROJECT.md` first. It is short, and it says plainly why this might work an
 ## Docs
 
 - `VISION.md`: the vision, ask your data a question and get a trusted answer in seconds
+- `ITERATION.md`: where the value actually is, after correcting the score to 24/45, ranked pivots, cache first
 - `PROJECT.md`: what pandata is, who it is for, and how we test it before building it
 - `COMPETITORS.md`: who else does this, and where the opening is
 - `ELEVATOR_PITCH.md`: how to explain it in 15, 30, and 60 seconds
