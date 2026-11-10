@@ -1,158 +1,123 @@
 # pandata
 
-Repo: https://github.com/isseu/pandata
+**The governed query layer for agents.**
 
-Status: validation only, as of 2026-11-10. The repo was created empty. No code, no prototype, no design partner, no paid pilot yet. Nothing in this file is a performance claim. Anything that sounds like a result is a target to prove, not a fact.
+Every agent that touches company data goes through pandata first. Pandata checks what the agent may ask, rewrites the question so it stays inside those limits, caps what it can spend, and says no when it should. It is not another agent. It is the layer underneath them, like Boat is for running code.
 
-## One line
+Status: we are still checking if this is worth building. No code yet, no customers yet, no pilot yet. Nothing here is a proven result. If a number sounds like a result, it is a target to test.
 
-The governed query layer for agents. Boat for data access, not another agent.
+## The problem, in plain words
 
-Every agent that touches company data has to go through pandata first. Pandata decides what that agent may ask, rewrites the query so it stays inside those limits, caps what it can spend, serves a safe cached answer when one exists, and logs everything. If a question is not allowed, or not defined, it refuses instead of guessing.
+Agents are starting to query company data directly, and three things go wrong.
 
-## The problem
+**They can see too much.** An agent can ask for the wrong tables, the wrong columns, or a full scan nobody approved.
 
-Agents are blocked, feared, or quietly expensive for the same three reasons:
+**They can spend too much.** One bad question can scan a huge amount of data. Agents also repeat almost the same question all day, and pay for it each time.
 
-1. Access is unmanaged per warehouse, per user, per query. An agent can ask for the wrong tables, the wrong columns, or a full scan nobody approved.
-2. Cost is unmanaged. One bad agent query can scan terabytes, and agent loops repeat near-identical queries all day.
-3. Numbers are unmanaged. Text-to-SQL will cheerfully return a wrong number when the business definition is missing. A wrong number is worse than no number.
+**They can give a wrong number.** If nobody has written down what a metric means, an agent will guess. A confident wrong number is worse than no number.
 
-The teams that feel this first are data platform teams in firms where agents already touch production data, or are blocked from doing so by governance rather than by lack of interest.
+Data teams feel this first, especially where agents already touch real data, or are blocked from doing so.
 
 ## What pandata does
 
-Five data-plane functions, in path, before a query reaches a warehouse:
+When an agent sends a question, pandata does five things, in order, before the question reaches the database.
 
-1. Parse and rewrite SQL. Parse agent SQL, check it against the semantic layer and policy, rewrite it to aggregation-only where required, block banned joins and cross-warehouse joins, and deny columns and tables the caller may not see.
-2. Enforce row and column policy per user. Policy follows the human user behind the agent, not just the agent identity. Apply row filters, column masking, and cell-level rules, and refuse when the effective permission does not cover the request.
-3. Cap bytes, rows, and cost. Estimate cost before execution, enforce a hard cap per query and per caller, and refuse or rewrite before money is spent.
-4. Cache and dedup, ACL-aware. Normalise SQL to a canonical form, then serve a semantically equivalent cached result only when the cached answer was computed under permissions that cover the current caller. Coalesce duplicate in-flight queries. A cache that ignores permissions is a leak, so permissions are part of the cache key.
-5. Log everything and refuse cleanly. Every decision, rewrite, cap, cache hit, and refusal is logged with the user, the tables and columns touched, and the cost estimate. Refusal is a first-class outcome, not an error to work around.
+1. **Read and fix the question.** It reads the SQL, the database language, checks it against the rules, and rewrites it. It blocks banned joins, blocks questions that span systems they should not span, and removes columns the caller may not see.
+2. **Check who is really asking.** The rules follow the person behind the agent, not just the agent. Pandata applies row and column rules, hides sensitive columns, and says no if the person does not have permission.
+3. **Cap the cost.** It estimates the cost before running anything, and stops the question if it would cost too much.
+4. **Reuse safe answers.** If the same question was already answered, pandata can reuse that answer, but only if the new caller had permission to see it. Permissions are part of the lookup, so a reused answer cannot leak data to the wrong person.
+5. **Write it all down, and say no cleanly.** Every decision, rewrite, cap, reuse, and refusal is logged. Saying no is a normal outcome, not an error.
 
-On top of the data plane sits a deterministic semantic layer: hand-authored business definitions and metrics, compiled to SQL, with refusal for out-of-scope questions. The data plane makes that layer enforceable. The layer alone does not create the definitions, and pandata does not claim otherwise.
+On top of this sits a list of business definitions, written by a person: what "revenue" means, what "active user" means, and so on. Pandata turns those definitions into SQL, and refuses questions that are outside them. That list is what makes answers right. Pandata does not write the list for you, and it does not claim to.
 
-## Flow
-
-```
-agent
-  -> pandata (identity + per-user ACL)
-  -> parse SQL, check semantic layer
-  -> rewrite / mask / filter, or refuse
-  -> estimate cost, check caps
-  -> ACL-aware cache lookup
-  -> execute on Snowflake / BigQuery / Databricks / Postgres / ClickHouse / DuckDB
-  -> log decision, query, cost, and result
-  -> answer, or refusal with a reason
-```
-
-## Who it is for first
-
-Target: 50 to 500 person firms that run two or more of Snowflake, BigQuery, Databricks, Postgres, ClickHouse, or DuckDB/MotherDuck in production, plus SaaS-backed tables agents query, and have no single native layer that spans them. They have a data platform owner who owns the warehouse bill, and no platform team that would self-host the open source stack.
-
-Screen in only if all three hold:
-
-- At least two engines in production, or a warehouse plus at least one SaaS-backed table agents query.
-- An agent or natural-language tool already touches production data, or is blocked from doing so by governance.
-- They can show a warehouse bill or query-history export, not just describe one.
-
-Screen out: single-warehouse shops (the native layer will win there), firms with no agent usage, firms under 50 or over 500 people, consultants and vendors.
-
-A secondary beachhead is regulated Chile and LatAm financials, where consent and audit evidence are the product as much as cost: 19 banks plus roughly 40 authorised fintechs in Chile, with Law 21.719 in full force from 1 Dec 2026 and Open Finance (NCG 514) in force July 2027. That is a validation market, not a venture-scale TAM on its own.
-
-## What pandata is not
-
-- Not another agent, chatbot, or text-to-SQL product. It does not generate the question. It governs the query.
-- Not a generic MCP gateway. Gateways do tool-level RBAC. Pandata parses SQL.
-- Not a context factory or semantic layer alone. It does not claim that a data plane fixes accuracy. Accuracy comes from hand-authored business definitions; pandata makes them enforceable and cheap.
-- Not a warehouse-native agent layer. Snowflake Cortex, Databricks Genie, BigQuery, and ClickHouse Agents are single-warehouse by design. Pandata only earns its keep where the estate is cross-engine.
-- Not a BI tool. It has no dashboard and no chart. It is infrastructure underneath agents and tools.
-
-## Boat principles
-
-Borrowed from Boat (boat.dev): the model, not the product.
-
-- Invisible. Agents and analysts should not have to think about it.
-- Measurable. The headline has to be a number on the customer's own bill: cheaper governed queries, hard caps held, zero leaked rows. To prove, not yet proven.
-- Full, not a toy. It has to handle the real estate, real permissions, and real query logs, or it is a demo.
-- Embeddable / OEM. The layer should be usable inside another vendor's product as well as direct. Candidate OEM targets, uncontacted: ClickHouse, MotherDuck, Starburst, Cube, dbt Labs. Snowflake and Databricks are capture risk, not a channel.
-
-## Why this might be real
-
-From the Nov 6, 2026 quantitative market-gap report (see `COMPETITORS.md` for the full map):
-
-- 0 of about 25 vendors reviewed do all five data-plane functions across warehouses and Postgres / ClickHouse / DuckDB. The closest partials are Dremio and Immuta, each doing three or more only partially.
-- No vendor documents ACL-aware semantic result caching with per-user keying as a product feature. Every cache found is either the warehouse's own exact-text result cache, broken by whitespace or predicate order in agent SQL, or a BI pre-aggregation.
-- The accuracy evidence points the same way. Spider 2.0 raw accuracy collapses from 91.2% on Spider 1.0 to 21.3% for the same agent, while a hand-authored semantic layer gets dbt to 100% in scope on a small test (n=11) and Cube to plus 17 to 23 points (n=100). The semantic layer is the accuracy. The data plane is what enforces it.
-
-## Why this might not work
-
-Honest limits, from the same Nov 6 report. The provisional score was 29/45, below the 31/45 pass bar. Proceed only as a 2 to 4 week validation sprint, not as a funded build.
-
-- Savings alone do not pay for it at base assumptions. A base firm at $24k/yr warehouse spend, 20% cache deflection, saves about $5,800/yr in warehouse plus LLM cost. That is less than a $12,000/yr price. It needs a higher spend firm, a real deflection rate near 49%, or a compliance and audit value priced separately.
-- The buyer is unclear. The data platform owner owns the warehouse bill, the CISO owns governance, the AI platform owner owns agents. Gateway price anchors are $29 to $125/mo. A $1,000/mo price can only be justified as a warehouse-cost product, with the saving measured on the customer's own bill.
-- Warehouse-native capture is the highest risk. Snowflake, Databricks, and ClickHouse all ship native agent layers, Genie was free for named users until 31 Jan 2027, and SAP bought Dremio in July 2026 for federated plus semantic plus MCP. Pandata survives only where the estate is cross-engine.
-- The semantic layer is an authoring problem, not a proxy problem. Hand-authored definitions per customer are the real cost. A Rust data plane does not create them.
-- No network effect and no data moat. Semantic definitions belong to the customer. Dremio or Immuta could add a cache or cap feature in one or two quarters. The moat, if any, is execution and trust.
-
-## Validation plan, in order
-
-1. One-day technical spike, before any interviews. Measure on real query logs, not a demo:
-   - Normalised cache hit rate on 1,000 real consecutive queries, exact-text vs normalised/semantic hits.
-   - SQL rewrite coverage on 50 agent-style queries: percent that parse, are aggregation-only, contain a blocked join, or touch a denied column.
-   - Latency overhead, p50 and p95, target under 5ms p50 and under 20ms p95.
-   - Cap enforcement: bytes and rows estimated pre-execution vs actual, percent that would have exceeded a $0.50 cap.
-   - Kill bar: normalised hit rate under 10% and rewrite coverage under 70%. Pass bar: hit rate at or above 20% and p95 overhead under 20ms.
-2. Ten design-partner interviews, weeks 2 to 3. Five Chile/LatAm financials, five US/EU mid-market SaaS or fintech, screened as above. Exact questions are in the Nov 6 report, section 6.
-3. Paid pilots at $500/mo, only if at least three partners commit on the basis of their own bill, with a 30-day savings guarantee measured on their own query logs. If deflection is under 10%, the pilot fee is refunded.
-4. OEM outreach, only after the spike and interviews: ClickHouse, MotherDuck, Cube, dbt Labs, Starburst.
-
-Kill line: kill if willingness to pay stays at 2 or fewer after 10 interviews, or the spike shows under 10% deflectable or cacheable queries, or at least 2 partners say they would buy the native layer instead. Any one condition is enough.
-
-## Pricing, proposed
-
-Tiered flat fee by warehouse spend, to test in pilots, not a list price:
-
-- $500/mo: under $25k/yr warehouse spend
-- $1,000/mo: $25k to $100k/yr
-- $2,500/mo: over $100k/yr, plus a regulated premium where audit evidence is the value
-
-Per-seat ($25/user/mo anchor) is a floor only. Per-query is a meter, not the headline. Percent of warehouse spend saved is the best direct-enterprise model and the worst self-serve model, because it needs before-and-after measurement on the customer's bill.
-
-Year-3 scenarios from the Nov 6 report, all estimates with assumptions stated there: pessimistic $300k ARR (50 customers at $6k/yr), base $2.4M ARR (200 at $12k/yr), optimistic $18M ARR (600 at $30k/yr, including 2 OEM deals). Even the optimistic case barely pays for itself on measured savings alone unless the high deflection rate is real.
-
-## Proposed architecture, not built
-
-- Language: Rust, for a small, senior, systems-heavy data plane. SQL parsing with sqlparser-rs or equivalent, per dialect.
-- Deployment: in-path proxy or library, inside the customer's trust boundary, near the warehouse. Not a hosted multi-tenant proxy that sees customer data by default.
-- Engines: Snowflake, BigQuery, Databricks, Postgres, ClickHouse, DuckDB/MotherDuck, plus SaaS-backed tables.
-- Components, planned: SQL parser and rewriter, policy engine (row/column, per-user ACL, masking), semantic layer compiler with refusal, cost estimator and cap enforcer, ACL-aware cache and dedup, audit log.
-- What to measure first: the spike in the validation plan above. No component is built until the spike says the hit rate and overhead are real.
-
-## Repo layout, planned
+How a question flows:
 
 ```
-PROJECT.md        # this file
-COMPETITORS.md    # vendor map, capability matrix, pricing anchors
-README.md         # short version of PROJECT.md, for the repo front page
-docs/
-  spike.md        # 1-day spike plan and measured results
-  interviews.md   # design-partner screening, questions, and anonymised outcomes
-  pricing.md      # pilot pricing and measured savings per pilot
-src/              # only after the spike passes
+agent asks a question
+  -> pandata checks who is asking, and what they may see
+  -> pandata reads and fixes the question, or says no
+  -> pandata checks the cost, and checks for a safe reused answer
+  -> the question runs, on Snowflake, BigQuery, Databricks, Postgres, ClickHouse, or DuckDB
+  -> pandata logs what happened
 ```
+
+## Who it is for
+
+Companies with 50 to 500 people, running two or more of those systems at once, with no single tool that covers them all. They have someone who owns the database bill, and no team to build this themselves.
+
+A good first customer has all three of these:
+
+- At least two database systems in use, or one warehouse plus other tables agents query.
+- An agent already touching real data, or blocked from doing so.
+- A real database bill or query history they can show us, not just describe.
+
+We are not for companies that use only Snowflake, or only Databricks. Their own tools already cover that, and they do it well. We are also not for companies with no agent using data yet.
+
+Chile and Latin American banks and fintechs are a second, smaller starting point. There, the audit trail matters as much as the cost: Chile has 19 banks and about 40 authorised fintechs, a new data protection law in force from 1 Dec 2026, and Open Finance rules from July 2027. That is a good place to test, not a big market on its own.
+
+## What it is not
+
+- Not another agent or chatbot. It does not come up with the question. It checks the question.
+- Not a generic gateway for AI tools. Those check which tool an agent may call. Pandata reads the actual database question.
+- Not a tool that fixes accuracy by itself. Accuracy comes from the business definitions, written by a person. Pandata makes those definitions enforceable.
+- Not a dashboard. It has no charts. It sits underneath other tools.
+
+## Why it might work
+
+From our research on 6 Nov 2026, in `COMPETITORS.md`:
+
+- No vendor we looked at, about 25 of them, does all five things above, across several database systems. The closest are Dremio and Immuta, and they only do part of it.
+- Nobody we found offers safe reuse of answers where permissions are part of the lookup. Warehouses reuse only exact copies of a question, and agents rarely ask the exact same question twice.
+- The accuracy evidence points the same way. The same agent scored 91.2 percent on a clean test, Spider 1.0, and 21.3 percent on real company work, Spider 2.0. A hand-written list of definitions got dbt to 100 percent on the questions it covered, in a small test of 11 questions. The list matters. Pandata makes the list enforceable.
+
+## Why it might not work
+
+We scored this 29 out of 45 in that same research, below our own bar of 31 to go ahead and build. So we test first.
+
+- **It may not pay for itself.** A typical company in our target spends about $24,000 a year on its warehouse. Even if we reuse 20 percent of agent questions, the saving is about $5,800 a year, less than a $12,000 a year price. It only works for bigger spenders, or if reuse is much higher, or if the audit trail is worth paying for on its own.
+- **It is not clear who buys it.** The data team owns the bill, the security team owns the rules, and the AI team owns the agents. They are often three different people.
+- **The big warehouses may close the gap.** Snowflake, Databricks, and ClickHouse all ship their own agent tools now. If they start covering several systems at once, our opening closes.
+- **Writing the definitions is the hard part.** That work takes time per customer, and no amount of fast code removes it.
+- **There is no lock-in.** The definitions belong to the customer. A competitor could add a cache or a cost cap in a few months. If we win, it will be by doing the work well and earning trust, not by a secret trick.
+
+## How we test it, before building it
+
+1. **A one-day test, on real query logs.** We measure how often questions repeat in a useful way, how many agent questions we can read and fix, and how much time we add. Pass if at least 20 percent of questions are reusable, and we add less than 20 milliseconds in the slow cases. Kill if under 10 percent are reusable.
+2. **Ten interviews.** Five in Chile and Latin America, five in the US and Europe. We only count it as a win if at least three say they will pay for a pilot, on the basis of their own bill.
+3. **Paid pilots at $500 a month.** Thirty days, measured on the customer's own logs. If reuse is under 10 percent, we refund the fee.
+4. **Only then, talk to other vendors** about building this inside their product: ClickHouse, MotherDuck, Cube, dbt Labs, Starburst.
+
+Kill it if 2 or fewer will pay after 10 interviews, or the one-day test shows under 10 percent reusable questions, or at least 2 people say they would just use the warehouse's own tool instead. Any one of those is enough.
+
+## Price, to test
+
+Not a final price, just what we test in pilots:
+
+- $500 a month, if the warehouse bill is under $25,000 a year
+- $1,000 a month, for $25,000 to $100,000 a year
+- $2,500 a month, above $100,000 a year
+
+In year three, our research estimates $300,000 a year in the low case, $2.4 million in the middle case, and $18 million in the high case, which needs other vendors selling it for us. Even the high case barely pays for itself on savings alone, unless reuse is much higher than we assume.
+
+## What we would build, if the tests pass
+
+- In Rust, a fast systems language, because this layer has to be quick and reliable.
+- It runs inside the customer's own systems, close to their databases, not as a shared service that sees their data.
+- First Snowflake and Postgres, then BigQuery, ClickHouse, and DuckDB.
+- No text-to-SQL generation, no dashboard, no shared hosted service.
+
+No part of this is built until the one-day test says the reuse rate and speed are real.
 
 ## Open questions
 
-- Is pandata a company, a personal build, or a validation-only project? The Nov 9 review scored it 2/5 as a standalone company build. Do not default to a startup.
-- Who are the first three design partners, by name, and will they share query logs?
-- What is the exact name story? Working reading: pan (across, all engines) plus data. Confirm or correct.
-- Who owns the semantic authoring per customer, and how long does it take? That is the bottleneck the data plane does not solve.
-- What would change the score? Three partners committing to a paid pilot at $500/mo or more on their own bill, a data platform owner (not a CISO or AI lead) signing the pilot, and proof that a cross-engine estate is the norm, not the exception, in the target segment.
+- Is this a company, a personal project, or just a test? Our review on 9 Nov scored it 2 out of 5 as a standalone company. Do not assume it is a startup.
+- Who are the first three customers by name, and will they share query logs?
+- Who writes the business definitions for each customer, and how long does that take?
+- What would change our mind? Three customers paying for a pilot at $500 a month or more, a data team lead signing it, and proof that most target companies really do run two or more systems.
 
 ## Sources
 
-- Nov 8, 2026 one-page pitch: "The governed query layer for agents", in `workspace/goals/governed-query-layer-for-agents/files/data-layer-pitch-one-pager/`
-- Nov 6, 2026 quantitative market-gap report: `workspace/research_notes/mcp-market-gap-quantitative-20261106-1358/report.md`
-- Nov 9, 2026 three-idea evaluation: governed query layer scored 2/5 as a standalone build, narrow wedge only
-- Spider 2.0: Lei et al., arXiv:2411.07763. Leaderboard figures are unreliable after the Jan 2026 audit found annotation errors in 62.8% of Spider 2.0-Snow items, so do not quote them as product evidence.
+- The one-page pitch from 8 Nov 2026, "The governed query layer for agents"
+- The market research from 6 Nov 2026, in `workspace/research_notes/mcp-market-gap-quantitative-20261106-1358/report.md`
+- The three-idea review from 9 Nov 2026
+- Spider 2.0, Lei et al. Do not quote its leaderboard scores as proof: a Jan 2026 audit found errors in 62.8 percent of its Snow items.
